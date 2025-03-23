@@ -16,12 +16,16 @@
     }
   }
   </script>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
 </head>
 <body>
   <script type="module">
+
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // Import OrbitControls
-
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+    import { Reflector } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/objects/Reflector.js';
     // Scene setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -32,10 +36,10 @@
     document.body.appendChild(renderer.domElement);
 
     // Add ambient light to the scene
-    const light = new THREE.AmbientLight(0x404040);  // Ambient light
+    const light = new THREE.AmbientLight(0xffffff);  // Ambient light
     scene.add(light);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // Directional light
-    directionalLight.position.set(10, 20, 10).normalize();
+    directionalLight.position.set(10, 120, 10).normalize();
     scene.add(directionalLight);
 
     // Load the heightmap texture with a callback
@@ -65,13 +69,26 @@
         // SKY BOX
         const loaderSkybox = new THREE.CubeTextureLoader();
         const skyboxTextures = loaderSkybox.load([
-          './skybox/1.jpg',  // Right side
-          './skybox/2.jpg',  // Left side
-          './skybox/6.jpg',  // Top side
-          './skybox/4.jpg',  // Bottom side
-          './skybox/5.jpg',  // Front side
-          './skybox/3.jpg',  // Back side
+        "skybox/rt.png",
+        "skybox/lt.png",
+     
+        "skybox/up.png",
+        "skybox/dn.png",
+        "skybox/fd.png",
+        "skybox/bk.png",
+     
         ]);
+
+/*
+    "skybox/TropicalSunnyDayLeft1024.jpg",
+        "skybox/TropicalSunnyDayRight1024.jpg",
+        "skybox/TropicalSunnyDayUp1024.jpg",
+        "skybox/TropicalSunnyDayDown1024.jpg",
+        "skybox/TropicalSunnyDayFront1024.jpg",
+        "skybox/TropicalSunnyDayBack1024.jpg",
+        */
+     
+
         scene.background = skyboxTextures; // Set the background to the skybox
 
         //*** TERRAIN
@@ -92,21 +109,29 @@
           positions[i * 3 + 2] = grayscale * 0.1; // Modify the Z position
 
           // Modify UVs
-          terrainGeometry.attributes.uv.array[i * 2] = u;    // U coordinate
-          terrainGeometry.attributes.uv.array[i * 2 + 1] = v; // V coordinate
+          // terrainGeometry.attributes.uv.array[i * 2] = u;    // U coordinate
+           //terrainGeometry.attributes.uv.array[i * 2 + 1] = v; // V coordinate
         }
 
         terrainGeometry.computeVertexNormals(); // Recalculate normals for shading
 
+
+
+        //TEXTURES
         // Load textures and normal map
         const terrainTexture = textureLoader.load('snow.jpg');
+        terrainTexture.wrapS = terrainTexture.wrapT = THREE.RepeatWrapping;
+        terrainTexture.repeat.set(10, 10); // Adjust based on how many times you want it tiled
+
         const normalMap = textureLoader.load('snowNormal.jpg');  // Load the normal map
+        normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
+        normalMap.repeat.set(10, 10);
 
         // Create a material for the terrain with the texture and normal map
         const terrainMaterial = new THREE.MeshLambertMaterial({
           map: terrainTexture,        // Apply the diffuse texture map
           normalMap: normalMap,       // Apply the normal map
-          normalScale: new THREE.Vector2(1, 1), // Adjust the intensity of the normal map
+          normalScale: new THREE.Vector2(0.2, 0.2), // Adjust the intensity of the normal map
           wireframe: false
         });
 
@@ -115,20 +140,97 @@
         terrain.rotation.x = -Math.PI / 2; // Rotate the terrain to be flat
         scene.add(terrain);
 
+
+
+
+
+        //CONTROLL
         // Create the OrbitControls for mouse interaction
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true; // Smooth the movement
         controls.dampingFactor = 0.25; // Damping factor for smoothness
         controls.screenSpacePanning = false; // Disable screen-space panning
 
+
+
+
+
+
+
+
+
+
+//WATER
+var waterMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        waterColor: { value: new THREE.Vector3(0.2, 0.22, 1) },
+        skyColor: { value: new THREE.Vector3(0.2, 0.6, 1.0) },
+        t: { value: 0.0 }
+    },
+    vertexShader: $('#waterVertexShader').text(),
+    fragmentShader: $('#waterFragmentShader').text(),
+    transparent: true,
+    opacity: 1,
+    depthWrite: false
+});
+
+// Load OBJ
+var loader2 = new OBJLoader();
+loader2.load("./water.obj", function (obj) {
+    obj.traverse(function (child) {
+        if (child instanceof THREE.Mesh) {
+             child.geometry.computeVertexNormals(); // Optional smoother surface
+            var water = new THREE.Mesh(child.geometry, waterMaterial);
+            water.position.y = 8.6;
+            water.scale.set(1.5, 1.5, 1.5);
+            scene.add(water);
+        }
+    });
+});
+
+  // Add spotlight
+  var spotLight = new THREE.SpotLight(0xffffff);
+  spotLight.position.set(40, 60, -10);
+  spotLight.intensity = 1.5;
+  scene.add(spotLight);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+ 
+
+
+
         // Start the animation loop
-        function animate() {
+        function animate(time) {
           requestAnimationFrame(animate);
 
           // Update the controls for smooth interaction
           controls.update();
 
-          renderer.render(scene, camera);
+          //WATER
+        // Convert time to seconds
+        const seconds = time * 0.001;
+        // Update shader time uniform
+        waterMaterial.uniforms.t.value = seconds;
+
+        renderer.render(scene, camera);
         }
         animate();
       },
@@ -145,5 +247,176 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
   </script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- **************************** SHADERS **********************-->
+<!-- Terrain Vetex Shader -->
+<script type="x-shader/x-vertex" id="terrainVertexShader">
+
+  // Varying is GLES equivalent for Output variables
+  varying vec4 v_color;
+  varying vec4 v_position;
+  varying vec3 v_normal;
+  varying vec2 v_texCoord0;
+
+  // Water Related
+  varying float v_waterDepth;	// water depth (positive for underwater, negative for the shore)
+  varying float v_fogFactor;
+
+  uniform vec3 lightDirection;
+  uniform vec3 lightColor;
+  uniform vec3 materialDiffuse;
+  uniform float waterLevel;	// water level (in absolute units)
+
+
+  void main() 
+  {
+      // calculate position
+      v_position = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * v_position;
+
+      // calculate normal
+      v_normal = normalize(mat3(modelViewMatrix) * normal);
+
+      // calculate depth of water
+      v_waterDepth = waterLevel - position.y;
+
+      // calculate the observer's altitude above the observed vertex
+      float eyeAlt = dot(-v_position.xyz, mat3(modelViewMatrix) * vec3(0, 1, 0));
+
+      // calculate fog factor
+      float fogDensity = 0.3;
+      v_fogFactor = exp2(-fogDensity * length(v_position) * max(v_waterDepth, 0.0) / eyeAlt);
+
+      // calculate texture coordinate
+      v_texCoord0 = uv;
+
+      // Calculate Directional Light
+      v_color = vec4(0, 0, 0, 0);
+      vec3 L = normalize(mat3(viewMatrix) * lightDirection);
+      float NdotL = max(dot(v_normal, L), 0.0);
+      v_color = vec4(materialDiffuse * lightColor * NdotL, 1);
+}
+</script>
+
+<!-- Terrain Fragment Shader -->
+<script type="x-shader/x-fragment" id="terrainFragmentShader">
+
+  // Varying is GLES equivalent for Input variables
+  varying vec4 v_color;
+  varying vec2 v_texCoord0;
+
+  // Water Related
+  varying float v_waterDepth;	// water depth (positive for underwater, negative for the shore)
+  varying float v_fogFactor;
+
+  // Uniform: The Texture
+  uniform sampler2D bedTexture;
+  uniform sampler2D shoreTexture;
+
+  // Water-related
+  uniform vec3 waterColor;
+
+  void main() 
+  {
+      gl_FragColor = v_color;
+
+      // shoreline multitexturing
+      float isAboveWater = clamp(-v_waterDepth, 0.0, 1.0);
+      gl_FragColor *= mix(texture2D(bedTexture, v_texCoord0), texture2D(shoreTexture, v_texCoord0), isAboveWater);
+
+      // underwater fog
+      gl_FragColor = mix(vec4(waterColor, 1), gl_FragColor, v_fogFactor);
+  }
+</script>
+
+<!-- Water Vetex Shader -->
+<script type="x-shader/x-vertex" id="waterVertexShader">
+
+  // Varying is GLES equivalent for Output variables
+  varying vec4 v_position;
+  varying vec3 v_normal;
+  varying float reflFactor;		// reflection coefficient
+
+  uniform float t;			// real time
+
+  float wave(float A, float x, float y, float t)
+  {
+      t *= 2.0;
+      return A * (
+          sin(2.0 * (x * 0.2 + y * 0.7) + t * 1.0) +
+          sin(2.0 * (x * 0.7 + y * 0.2) + t * 0.8) +
+          pow(sin(2.0 * (x * 0.6 + y * 0.5) + t * 1.2), 2.0) +
+          pow(sin(2.0 * (x * 0.8 + y * 0.2) + t * 1.1), 2.0));
+  }
+
+  void main() 
+  {
+      // Calculate the wave
+      float a = 0.05;
+      float y = wave(a, position.x, position.z, t);
+
+      float d = 0.05;
+      float dx = (wave(a, position.x+d, position.z, t) - wave(a, position.x-d, position.z, t)) / 2.0 / d;
+      float dz = (wave(a, position.x, position.z+d, t) - wave(a, position.x, position.z-d, t)) / 2.0 / d;
+
+      v_position = vec4(position.x, y, position.z, 1.0);
+      v_normal = normalize(vec3(-dx, 1.0, -dz));
+
+      // calculate position
+      v_position = modelViewMatrix * v_position;
+      gl_Position = projectionMatrix * v_position;
+
+      // calculate normal
+      v_normal = normalize(mat3(modelViewMatrix) * v_normal);
+
+      // calculate reflection coefficient
+      // using Schlick's approximation of Fresnel formula
+      float cosTheta = dot(v_normal, normalize(-v_position.xyz));
+      float R0 = 0.02;
+      reflFactor = R0 + (1.0 - R0) * pow(1.0 - cosTheta, 5.0);
+}
+</script>
+
+<!-- Water Fragment Shader -->
+<script type="x-shader/x-fragment" id="waterFragmentShader">
+
+  // Input Variables (received from Vertex Shader)
+  varying float reflFactor;			// reflection coefficient
+
+  // Water-related
+  uniform vec3 waterColor;
+  uniform vec3 skyColor;
+
+  void main() 
+  {
+      gl_FragColor = mix(vec4(waterColor, 0.0), vec4(skyColor, 1.0), reflFactor);
+  }
+</script>
+<!-- End Shaders -->
 </body>
 </html>
