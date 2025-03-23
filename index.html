@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Terrain from Heightmap in Three.js</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+  </style>
+
+  <!-- Define importmap to resolve module paths -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // Import OrbitControls
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 20, 100); // Position the camera
+
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Add ambient light to the scene
+    const light = new THREE.AmbientLight(0x404040);  // Ambient light
+    scene.add(light);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // Directional light
+    directionalLight.position.set(10, 20, 10).normalize();
+    scene.add(directionalLight);
+
+    // Load the heightmap texture with a callback
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(
+      './worldHM.jpg',  // Path to your heightmap image
+      (heightmapTexture) => {
+        // This function will be called once the texture has loaded
+
+        // Create plane geometry for the terrain
+        const terrainWidth = 100;
+        const terrainHeight = 100;
+        const widthSegments = 128;
+        const heightSegments = 128;
+        const terrainGeometry = new THREE.PlaneGeometry(terrainWidth, terrainHeight, widthSegments, heightSegments);
+
+        // Create a canvas to draw the heightmap texture
+        const heightmapCanvas = document.createElement('canvas');
+        const context = heightmapCanvas.getContext('2d');
+        heightmapCanvas.width = heightmapTexture.image.width;
+        heightmapCanvas.height = heightmapTexture.image.height;
+        context.drawImage(heightmapTexture.image, 0, 0);
+
+        const imageData = context.getImageData(0, 0, heightmapCanvas.width, heightmapCanvas.height);
+        const data = imageData.data;
+
+        // SKY BOX
+        const loaderSkybox = new THREE.CubeTextureLoader();
+        const skyboxTextures = loaderSkybox.load([
+          './skybox/1.jpg',  // Right side
+          './skybox/2.jpg',  // Left side
+          './skybox/6.jpg',  // Top side
+          './skybox/4.jpg',  // Bottom side
+          './skybox/5.jpg',  // Front side
+          './skybox/3.jpg',  // Back side
+        ]);
+        scene.background = skyboxTextures; // Set the background to the skybox
+
+        //*** TERRAIN
+        const positions = terrainGeometry.attributes.position.array; // Get the position attribute array
+
+        // Modify geometry vertices based on heightmap
+        for (let i = 0, l = positions.length / 3; i < l; i++) {
+          const u = (i % (widthSegments + 1)) / (widthSegments);  // U coordinate (horizontal)
+          const v = Math.floor(i / (widthSegments + 1)) / (heightSegments);  // V coordinate (vertical)
+
+          const x = Math.floor(u * heightmapCanvas.width);
+          const y = Math.floor(v * heightmapCanvas.height);
+
+          const pixelIndex = (y * heightmapCanvas.width + x) * 4; // RGBA values
+          const grayscale = data[pixelIndex]; // R is the grayscale value
+
+          // Set the Z position based on the grayscale value (height)
+          positions[i * 3 + 2] = grayscale * 0.1; // Modify the Z position
+
+          // Modify UVs
+          terrainGeometry.attributes.uv.array[i * 2] = u;    // U coordinate
+          terrainGeometry.attributes.uv.array[i * 2 + 1] = v; // V coordinate
+        }
+
+        terrainGeometry.computeVertexNormals(); // Recalculate normals for shading
+
+        // Load textures and normal map
+        const terrainTexture = textureLoader.load('snow.jpg');
+        const normalMap = textureLoader.load('snowNormal.jpg');  // Load the normal map
+
+        // Create a material for the terrain with the texture and normal map
+        const terrainMaterial = new THREE.MeshLambertMaterial({
+          map: terrainTexture,        // Apply the diffuse texture map
+          normalMap: normalMap,       // Apply the normal map
+          normalScale: new THREE.Vector2(1, 1), // Adjust the intensity of the normal map
+          wireframe: false
+        });
+
+        // Create terrain mesh and add it to the scene
+        const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+        terrain.rotation.x = -Math.PI / 2; // Rotate the terrain to be flat
+        scene.add(terrain);
+
+        // Create the OrbitControls for mouse interaction
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // Smooth the movement
+        controls.dampingFactor = 0.25; // Damping factor for smoothness
+        controls.screenSpacePanning = false; // Disable screen-space panning
+
+        // Start the animation loop
+        function animate() {
+          requestAnimationFrame(animate);
+
+          // Update the controls for smooth interaction
+          controls.update();
+
+          renderer.render(scene, camera);
+        }
+        animate();
+      },
+      undefined,  // onProgress (not used here)
+      (error) => {  // onError
+        console.error('Error loading texture:', error);
+      }
+    );
+
+    // Handle window resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
