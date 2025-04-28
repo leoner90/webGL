@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Terrain from Heightmap in Three.js</title>
+    <style>
+      body { margin: 0; overflow: hidden; }
+    </style>
+
+    <!-- importmap to resolve module paths -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+      }
+    }
+    </script>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+  </head>
+
+
+<body>
+  <div id="loader">Loading...</div>
+  <!-- loader style -->
+  <style>
+    #loader 
+    {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: #000;
+      color: white;
+      font-size: 2em;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+  </style>
+
+  <script type="module">
+
+    // ************ IMPORTS ************
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { FBXLoader  } from "three/addons/loaders/FBXLoader.js";
+    import { loadTerrain, getTerrainHeightAt, terrainMaterial  } from './terrain.js';
+    import { createShaderWater, createReflectiveWater } from './water.js';
+    import { createLeafParticles } from './particles.js';
+    import { initSound } from './sounds.js';
+    import { Player } from './player.js';
+ 
+    // ************ LOADER ************
+    function modelLoader(modelName, position, scale, rotation = new THREE.Vector3(0,0,0) )
+    {
+      var loader = new GLTFLoader();
+      var model;
+
+      loader.load(modelName, function (gltf) 
+      {
+        model = gltf.scene;
+        model.position.copy(position);
+        model.scale.copy(scale);
+        model.rotation.set
+        (
+          THREE.MathUtils.degToRad(rotation.x),
+          THREE.MathUtils.degToRad(rotation.y),
+          THREE.MathUtils.degToRad(rotation.z)
+        );
+        scene.add(model);  
+      });
+
+      return model;
+    }
+
+    const manager = new THREE.LoadingManager();
+    manager.onLoad = function () 
+    {
+      document.getElementById('loader').style.display = 'none';
+    };
+
+
+     // ************ SCENE SETUP ************
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 5000);
+    var b_IsControlInTestMode = false;
+    camera.position.set(-250, 42, -251); // Position the camera
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Add light to the scene (just for the object, terrain uses shader light!!!!!!!!!!!!!!!)
+    const light = new THREE.AmbientLight(0xffffff, 0.3);  
+    scene.add(light);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.2);  
+    directionalLight.position.set(10, 120, 10).normalize();
+    scene.add(directionalLight);
+
+    //rest
+    let waterLvl = 29;
+    const player = new Player(scene, './models/Paddling.fbx', './models/idle.fbx', "./models/paddle.fbx", { x: 0, y: 0, z: 0 }, 0.07);
+
+ 
+
+    /************* SKYBOX ************/
+    const textureLoader = new THREE.TextureLoader(manager);
+    const texture = textureLoader.load('textures/skybox/skyBoxLowQ.jpg');
+
+    const geometry = new THREE.SphereGeometry(900, 60, 40);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      side: THREE.BackSide 
+    });
+    const skyboxMesh = new THREE.Mesh(geometry, material);
+    scene.add(skyboxMesh);
+
+
+    /************* TERRAIN ************/
+    const textureLoaders = new THREE.TextureLoader(manager);
+    loadTerrain(scene, manager, textureLoaders); // from terrain.js
+
+ 
+    /******************************* MODELS LOADING ******************************/
+ 
+    //BOAT
+    var loader = new GLTFLoader();
+    var boat;
+    loader.load("./models/boatNoPaddls.glb", function (gltf) {
+      boat = gltf.scene;
+      boat.position.set(-222, waterLvl, -250);
+      boat.scale.set(0.03, 0.03, 0.03);
+      boat.rotation.y = Math.PI ; 
+      scene.add(boat);
+    })
+   
+
+    // BRIDGE
+    var bridge =  modelLoader("./models/bridge.glb", new THREE.Vector3(194, 127, 95), new THREE.Vector3(29, 10, 18), new THREE.Vector3(-11, 0, 2.5));
+      
+ 
+    // LAMP POST + BULB + POINT LIGHT
+    const lampPositionsAndRotation = 
+      [
+          [-260, waterLvl + 5, -11, Math.PI / 2],
+          [-120, waterLvl + 5, 139, -Math.PI / 8],
+          [15, waterLvl + 5, 284,  Math.PI  ],
+          [292, waterLvl + 5, 135, - Math.PI / 2 ],
+          [-18, waterLvl + 5, -33, Math.PI / 2],
+      ];
+
+      lampPositionsAndRotation.forEach((pos, index) => 
+      {
+        modelLoader("./models/lampPost.glb", new THREE.Vector3(pos[0], pos[1], pos[2]), new THREE.Vector3(6, 6, 5), new THREE.Vector3(0, pos[3] * (180 / Math.PI), 0));
+      });
+
+    // LAMP
+    var loader3 = new GLTFLoader();
+    const lampClones = [];
+    const pointLights = [];
+    loader3.load("./models/lamp.glb", function (gltf) {
+      var  lamp = gltf.scene;
+
+        lamp.scale.set(5, 6, 5);
+        lamp.rotation.y = Math.PI / 2;
+        lampPositionsAndRotation.forEach((pos, index) => 
+        {
+            // bulbs
+            const clone = lamp.clone(true);
+            clone.position.set(pos[0], pos[1], pos[2]);
+            clone.rotation.y = pos[3];
+            scene.add(clone);
+            lampClones.push(clone);
+
+            //point Light
+            const pointLight = new THREE.PointLight(0xffffff, 500, 50, 2); // intensity, distance, attenuation
+            pointLight.position.set(pos[0], pos[1] + 30, pos[2]); // Slightly above the lamp
+            scene.add(pointLight);
+            pointLights.push(pointLight);
+        });
+  
+    });
+
+    
+    // *************** TREE LOAD **************
+    const treeClones = [];
+    var loader3 = new GLTFLoader();
+
+    loader3.load("./models/sakura.glb", function (gltf) 
+    {
+        const originalTree = gltf.scene;
+        originalTree.scale.set(222, 222, 222);
+        
+        const treePositions = [
+            [-260, waterLvl + 5, -60],
+            [-263, waterLvl + 5, 50],
+            [-230, waterLvl + 5, 182],
+            [-96, waterLvl + 5, 275],
+            [-70, waterLvl + 5, 180],
+            [100, waterLvl + 5, 286],
+            [190, waterLvl + 5, 167],
+            [300, waterLvl + 5,45],
+            [-157, waterLvl + 5, 35],
+            [-184, waterLvl + 5, 238],
+            [29, waterLvl + 5, 200],
+            [-9, waterLvl + 5, -5],
+            [118, waterLvl + 5, -132],
+            [60, waterLvl + 5, -248],
+            [200, waterLvl + 5, 265],
+            [200, waterLvl + 5, -53],
+            [-25, waterLvl + 5, -132],
+        ];
+
+        treePositions.forEach((pos, index) => 
+        {
+            const clone = originalTree.clone(true);
+            clone.position.set(pos[0], pos[1], pos[2]);
+            scene.add(clone);
+            treeClones.push(clone);
+        });
+    });
+
+
+    //CLIFF
+    var loader3 = new GLTFLoader();
+    loader3.load("./models/cliff.glb", function (gltf) 
+    {
+        var cliff = gltf.scene;
+        cliff.position.x = 260;
+        cliff.position.y = waterLvl ;
+        cliff.position.z = -230;
+
+        cliff.rotation.y = -Math.PI / 1.7;
+        cliff.scale.set(35, 65, 35);
+        scene.add(cliff);
+    });
+
+    // STATUES
+    var loader3 = new GLTFLoader();
+    loader3.load("./models/statue.glb", function (gltf) 
+    {
+      const originalStatue = gltf.scene;
+      // First statue
+      const statue1 = originalStatue.clone();
+      statue1.position.set(190, waterLvl + 30 , -288);
+       statue1.rotation.y = Math.PI / 6  ;
+      statue1.scale.set(15, 15, 15);
+      scene.add(statue1);
+
+      // Second statue (cloned)
+      const statue2 = originalStatue.clone();
+      statue2.position.set(190, waterLvl + 30, -195); // just different Z position
+      statue2.scale.set(15, 15, 15);
+      statue2.scale.x = -15; // mirroring along X-axis
+      statue2.rotation.y = Math.PI * 0.9  ;
+      scene.add(statue2);
+    });
+
+    
+    //sound
+    initSound(camera, scene);
+
+    //WATER
+    const waterMaterial = createShaderWater(scene, waterLvl);
+    const reflectiveWater = createReflectiveWater(scene, waterLvl);
+    
+    //WATERFALL
+    const textureLoader2 = new THREE.TextureLoader(manager);
+    const waterfallTexture = textureLoader2.load('textures/waterfall.jpg');
+    waterfallTexture.wrapS = THREE.RepeatWrapping;
+    waterfallTexture.wrapT = THREE.RepeatWrapping;
+
+    const waterfallMaterial = new THREE.MeshStandardMaterial({
+      map: waterfallTexture,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    });
+
+    const waterfallGeometry = new THREE.PlaneGeometry(90, 200, 1, 1);
+    const waterfallMesh = new THREE.Mesh(waterfallGeometry, waterfallMaterial);
+    waterfallMesh.position.set(290,  waterLvl + 100, -240);
+    scene.add(waterfallMesh);
+    
+    waterfallMesh.rotation.x = -Math.PI / 3; // lean back + rotate
+    waterfallMesh.rotation.y = -Math.PI / 2.4;
+    waterfallMesh.rotation.z = -Math.PI / 3;  
+
+
+    //FOG
+    scene.fog = new THREE.FogExp2(0x222222, 0.002);
+    const x = -250 + (Math.random() - 0.5) * 5;
+    const y = waterLvl + 60 + Math.random() * 10;
+    const z = -90 + (Math.random() - 0.5) * 5;
+
+    const leafPositions = [
+      { x: -260, y: waterLvl + 5, z: -60 },
+      { x: -263, y: waterLvl + 5, z: 50 },
+      { x: -230, y: waterLvl + 5, z: 182 },
+      { x: -96,  y: waterLvl + 5, z: 275 },
+      { x: -70,  y: waterLvl + 5, z: 180 },
+      { x: 100,  y: waterLvl + 5, z: 286 },
+      { x: 190,  y: waterLvl + 5, z: 167 },
+      { x: 300,  y: waterLvl + 5, z: 45 },
+      { x: -157, y: waterLvl + 5, z: 35 },
+      { x: -184, y: waterLvl + 5, z: 238 },
+      { x: 29,   y: waterLvl + 5, z: 200 },
+      { x: -9,   y: waterLvl + 5, z: -5 },
+      { x: 118,  y: waterLvl + 5, z: -132 },
+      { x: 60,   y: waterLvl + 5, z: -248 },
+      { x: 200,  y: waterLvl + 5, z: 265 },
+      { x: 200,  y: waterLvl + 5, z: -53 },
+      { x: -25,  y: waterLvl + 5, z: -132 }
+    ]
+
+    //particles sakura leafs
+    const leafAnimators = [];
+    const leafParticlesArray = [];
+    
+    leafPositions.forEach(pos => 
+    {
+      const animate = createLeafParticles(scene, manager, waterLvl, pos);
+      leafAnimators.push(animate);
+    });
+ 
+  // *************** CONTROLLERS **************
+    const keys = { w: false, s: false, a: false, d: false, q: false, e: false, c: false };
+    const previousKeys = {};
+    var speed = 0.5; 
+    const turnSpeed = 0.0006;
+
+    let yaw = 0; 
+    let pitch = 0; 
+    const canvas = renderer.domElement;
+    // Mouse movement for rotation
+    document.addEventListener('mousemove', (event) => {
+      if (document.pointerLockElement === canvas) {
+        yaw -= event.movementX * turnSpeed;
+        pitch -= event.movementY * turnSpeed;
+
+        // Clamp pitch
+        const maxPitch = Math.PI / 2 - 0.01;
+        pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+      }
+    });
+
+    // Pointer lock on click
+    window.addEventListener('click', () => {
+      canvas.requestPointerLock();
+    });
+
+    // Keyboard input
+    window.addEventListener("keydown", (event) => {
+      if (keys.hasOwnProperty(event.key)) keys[event.key] = true;
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (keys.hasOwnProperty(event.key)) keys[event.key] = false;
+    });
+
+    const clock = new THREE.Clock();
+ 
+    
+    // ************** ANIMATE ******************
+    function animate(time) 
+    {
+      requestAnimationFrame(animate);
+
+      //WATER
+      const seconds = time * 0.001;  
+      const delta = clock.getDelta(); 
+      player.update(delta);
+      waterMaterial.uniforms.t.value = seconds;
+        
+      //rotate the skybox
+      skyboxMesh.rotation.y += 0.0005; 
+      skyboxMesh.rotation.x += 0.0005;
+
+      //animated lamp & light
+      lampClones.forEach((alamp, i) => {
+        alamp.rotation.z = Math.cos(seconds) * 0.03;
+      });
+
+      pointLights.forEach((light, i) => {
+      light.position.z += Math.cos(seconds) * 0.16;
+
+      // Update the light position in the terrain material
+     // if(terrainMaterial)
+        //terrainMaterial.uniforms.lightPosition.value.set(light.position.x, light.position.y, light.position.z);
+    });
+
+      //controls
+      // Apply camera rotation
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = yaw + Math.PI;
+      camera.rotation.x = pitch;
+
+      // Movement
+      const direction = new THREE.Vector3();
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3(0, 1, 0);
+
+      camera.getWorldDirection(direction); // Forward
+      direction.y = 0; // Prevent camera flying when looking up/down
+      direction.normalize();
+
+      right.crossVectors(direction, up).normalize();
+
+      //speed for testing
+      if(b_IsControlInTestMode) 
+        speed = 2;
+      else
+        speed = 0.5;
+
+      if (keys.w) 
+      {
+        const nextPos = camera.position.clone().addScaledVector(direction, speed);
+        const boatPos = boat.position.clone().addScaledVector(direction, speed); // Use boat's position
+        const terrainHeight = getTerrainHeightAt(boatPos.x, boatPos.z);
+
+        //Boat blocked if too shallow , and not in test mode
+        if (terrainHeight <= waterLvl - 1 || b_IsControlInTestMode) {
+          camera.position.copy(nextPos);  
+        } 
+        //animation check and play
+        const isPlaying = player.animations['paddling']?.isRunning?.() === true;
+        if(!isPlaying) 
+          player.playAnimation('paddling');
+      }
+      else 
+      {
+        const idle = player.animations['idle']?.isRunning?.() === true; //animation check and play or idle (w not pressed)
+        if(!idle)
+          player.playAnimation('idle');
+      }
+      if (keys.s && b_IsControlInTestMode) camera.position.addScaledVector(direction, -speed);
+      if (keys.a && b_IsControlInTestMode) camera.position.addScaledVector(right, -speed);
+      if (keys.d && b_IsControlInTestMode) camera.position.addScaledVector(right, speed);
+      if (keys.q && b_IsControlInTestMode) camera.position.y -= speed; // Down
+      if (keys.e && b_IsControlInTestMode) camera.position.y += speed; // Up
+      if (keys.c && !previousKeys.c) 
+        b_IsControlInTestMode = !b_IsControlInTestMode;
+      previousKeys.c = keys.c;
+
+      //console.log(camera.position) // for test pos
+      // Boat and Player positioning
+      if (boat && player) 
+      {  
+          const offset = new THREE.Vector3(0, 0, 26); // front of the camera
+          const horizontalQuat = new THREE.Quaternion();
+
+          // horizontal rotation for the boat
+          horizontalQuat.setFromEuler(new THREE.Euler(0, yaw, 0)); //  only yaw used
+          const behindCamera = camera.position.clone().add(offset.applyQuaternion(horizontalQuat));
+          boat.position.set(behindCamera.x, waterLvl, behindCamera.z); // Lock Y to water level
+          boat.rotation.set(0, yaw, 0);  // rotate boat to match horizontal direction
+
+          const playerOffset = new THREE.Vector3(0, -1, -3); // Offset in boat's local space
+          const rotatedOffset = playerOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw); // Rotate around Y
+
+          const playerPos = boat.position.clone().add(rotatedOffset);
+       
+          if (player && player.model && player.model.position && player.model.rotation) 
+          {
+            player.model.position.copy(playerPos);
+            player.model.rotation.set(0, yaw, 0);
+          }
+                
+          
+          // boat & player wawes fake effect
+          const wave = Math.sin(time * 0.001) *  0.05;
+          boat.rotation.x = wave;  
+          boat.position.y -= 1;
+          boat.rotation.z = wave * 0.5;
+      }
+
+      //waterfall Animate texture UVs
+      waterfallTexture.offset.y += 0.01; // scroll downward
+    
+      //leafs
+      leafAnimators.forEach(anim => anim());
+
+      //trees + Simple wind sway
+      treeClones.forEach((tree, i) => {
+        tree.rotation.z = Math.sin(performance.now() * 0.001 + i) * 0.01;
+      });
+ 
+      renderer.render(scene, camera);
+    }
+
+    animate();
+    
+ 
+    // Handle window resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+
+
+
+
+
+<!-- **************************** SHADERS **********************-->
+<!-- Terrain Vetex Shader -->
+<script type="x-shader/x-vertex" id="terrainVertexShader">
+  varying float v_waterDepth;
+  varying vec2 v_texCoord0;
+  varying vec2 v_texCoord1;
+
+  uniform float waterLevel;
+  uniform float repeatFactor;
+
+  //light update
+  uniform vec3 lightPosition;
+  varying vec3 v_lightDirection;
+
+  void main() {
+      v_waterDepth = waterLevel - position.z;  
+
+      // Scale the texture UV
+      v_texCoord0 = uv * repeatFactor;
+      v_texCoord1 = uv * repeatFactor;
+
+      // Calculate the light direction vector (normalized)
+      v_lightDirection = normalize(lightPosition - position); 
+  
+      // transformation for position
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+</script>
+
+<script type="x-shader/x-fragment" id="terrainFragmentShader">
+  varying float v_waterDepth;
+  varying vec2 v_texCoord0;
+  varying vec2 v_texCoord1; 
+
+  uniform sampler2D bedTexture;  
+  uniform sampler2D shoreTexture;  
+
+  // Light direction from vertex shader
+  varying vec3 v_lightDirection;  
+
+  void main() {
+      float isAboveWater = clamp(-v_waterDepth, 0.0, 1.0);
+
+      // Sample the textures based on the UV coordinates
+      vec4 groundColor = texture2D(bedTexture, v_texCoord0);
+      vec4 shoreColor = texture2D(shoreTexture, v_texCoord1);
+
+      // Blend the textures based on the water depth + shoreline
+      vec4 finalColor = mix(groundColor, shoreColor, isAboveWater);
+      
+      float lightIntensity = max(dot(v_lightDirection, normalize(vec3(0.0, 1.0, 0.0))), 0.0);
+      finalColor.rgb *= 0.4 + lightIntensity * 0.2;  
+
+      gl_FragColor = finalColor;
+  }
+</script>
+
+<!-- Water Vetex Shader -->
+<script type="x-shader/x-vertex" id="waterVertexShader">
+
+  // Varying is GLES equivalent for Output variables
+  varying vec4 v_position;
+  varying vec3 v_normal;
+  varying float reflFactor;		// reflection coefficient
+
+  uniform float t;			// real time
+
+  float wave(float A, float x, float y, float t)
+  {
+      t *= 2.0;
+      return A * (
+          sin(2.0 * (x * 0.2 + y * 0.7) + t * 1.0) +
+          sin(2.0 * (x * 0.7 + y * 0.2) + t * 0.8) +
+          pow(sin(2.0 * (x * 0.6 + y * 0.5) + t * 1.2), 2.0) +
+          pow(sin(2.0 * (x * 0.8 + y * 0.2) + t * 1.1), 2.0));
+  }
+
+  void main() 
+  {
+      // Calculate the wave
+      float a = 0.05;
+      float y = wave(a, position.x, position.z, t);
+
+      float d = 0.35;
+      float dx = (wave(a, position.x+d, position.z, t) - wave(a, position.x-d, position.z, t)) / 2.0 / d;
+      float dz = (wave(a, position.x, position.z+d, t) - wave(a, position.x, position.z-d, t)) / 2.0 / d;
+
+      v_position = vec4(position.x, y, position.z, 1.0);
+      v_normal = normalize(vec3(-dx, 1.0, -dz));
+
+      // calculate position
+      v_position = modelViewMatrix * v_position;
+      gl_Position = projectionMatrix * v_position;
+
+      // calculate normal
+      v_normal = normalize(mat3(modelViewMatrix) * v_normal);
+
+      // calculate reflection coefficient
+      float cosTheta = dot(v_normal, normalize(-v_position.xyz));
+      float R0 = 0.02;
+      reflFactor = R0 + (1.0 - R0) * pow(1.0 - cosTheta, 2.5);
+}
+</script>
+
+<!-- Water Fragment Shader -->
+<script type="x-shader/x-fragment" id="waterFragmentShader">
+
+  // Input Variables (received from Vertex Shader)
+  varying float reflFactor;			// reflection coefficient
+
+  // Water-related
+  uniform vec3 waterColor;
+  uniform vec3 skyColor;
+
+  void main() 
+  {
+      gl_FragColor = mix(vec4(waterColor, 0.05), vec4(skyColor, 0.3), reflFactor);
+  }
+</script>
+
+<!-- End Shaders -->
+</body>
+</html>
